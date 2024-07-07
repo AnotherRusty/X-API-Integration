@@ -1,44 +1,83 @@
 import requests
-import os
-import json
+# # import os
+import time
+from datetime import datetime, timezone, timedelta
+# # from dotenv import load_dotenv
 
-# Load environment variables from .env file (if using dotenv)
-from dotenv import load_dotenv
-load_dotenv()
+# # load_dotenv()
+# # bearer_token = os.getenv("BEARER_TOKEN")
 
-# Get the Bearer Token from the environment variable
-bearer_token = os.getenv("BEARER_TOKEN")
+# Define constants
+BEARER_TOKEN = ""
+SEARCH_URL = "https://api.twitter.com/2/tweets/search/recent"
+USER_AGENT = "v2RecentSearchPython"
+CHECK_INTERVAL = 15  # Interval in seconds to check for new tweets
 
-search_url = "https://api.twitter.com/2/tweets/search/recent"
-
-# Parameters for the API request
-query_params = {
-    'query': '(from:twitterdev -is:retweet) OR #twitterdev',
-    'tweet.fields': 'author_id'
-}
-
-def bearer_oauth(r):
+def get_bearer_headers(token):
     """
-    Method required by bearer token authentication.
+    Returns headers required for Bearer token authentication.
     """
-    r.headers["Authorization"] = f"Bearer {bearer_token}"
-    r.headers["User-Agent"] = "v2RecentSearchPython"
-    return r
-
-def connect_to_endpoint(url, params):
-    headers = {
-        "Authorization": f"Bearer {bearer_token}",
-        "User-Agent": "v2RecentSearchPython",
-        "Content-Type": "application/json"  # Specify content type as JSON for POST request
+    return {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": USER_AGENT
     }
-    response = requests.post(url, headers=headers, json=params)
+
+def get_query_params(user_id, start_time):
+    """
+    Returns query parameters for the Twitter API request.
+    """
+    return {
+        "query": f"from:{user_id}",
+        "tweet.fields": "created_at",
+        "start_time": start_time,
+    }
+
+def fetch_new_tweets(url, headers, params):
+    """
+    Fetches new tweets from the Twitter API endpoint.
+    """
+    response = requests.get(url, headers=headers, params=params)
     if response.status_code != 200:
         raise Exception(f"Error connecting to endpoint: {response.status_code} - {response.text}")
     return response.json()
 
+def print_tweet_details(tweets):
+    """
+    Prints the created_at and text of each tweet in the response.
+    """
+    for tweet in tweets:
+        print(f"Tweet Created At: {tweet['created_at']}")
+        print(f"Tweet Text: {tweet['text']}")
+        print("-" * 40)
+
+def get_current_utc_timestamp():
+    """
+    Returns the current UTC timestamp minus one minute in the required format.
+    """
+    return (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
 def main():
-    json_response = connect_to_endpoint(search_url, query_params)
-    print(json.dumps(json_response, indent=4, sort_keys=True))
+    user_id = input("Enter the user id: ")
+    old_start_time = get_current_utc_timestamp()
+
+    try:
+        while True:
+            headers = get_bearer_headers(BEARER_TOKEN)
+            params = get_query_params(user_id, old_start_time)
+
+            json_response = fetch_new_tweets(SEARCH_URL, headers, params)
+
+            if "meta" in json_response and json_response["meta"]["result_count"] > 0:
+                new_start_time = json_response["data"][0]["created_at"]
+
+                if new_start_time != old_start_time:
+                    print_tweet_details(json_response["data"])
+                    old_start_time = new_start_time
+
+            time.sleep(CHECK_INTERVAL)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
     main()
